@@ -1,4 +1,3 @@
-# src/broker/consumer.py
 import json
 import pika
 import os
@@ -59,34 +58,48 @@ class Consumer:
             routing_key=self.dlq
         )
 
-    def callback(self, ch, method, properties, body):
-        retries = properties.headers.get("x-retries", 0) if properties.headers else 0
-
+    def process_message(self, body, properties):
+        print("receive message from main server")
         try:
+            # Parse message
             message = json.loads(body)
+            print(f"Received message: {message}")
+
+            content = message.get("content", None)  
+            media = message.get("media", [])  
+            base_url = message.get("base_url", "")  
+
             request = PostModerationRequest(
                 post_id=message["post_id"],
-                content=message["content"],
-                base_url=message["base_url"],
-                media=message["media"]
+                content=content,
+                base_url=base_url,
+                media=media
             )
 
-            content_result = self.text_moderator.moderate(request.content)
-            content_response = ContentResult(
-                label=content_result["label"],
-                censored_text=content_result["censored_text"]
-            )
+            if content and content.strip():
+                content_result = self.text_moderator.moderate(request.content)
+                content_response = ContentResult(
+                    label=content_result["label"],
+                    censored_text=content_result["censored_text"]
+                )
+            else:
+                content_response = ContentResult(
+                    label="normal",
+                    censored_text=""
+                )
 
             media_label = "normal"
-            for media_file in request.media:
-                file_path = os.path.join(request.base_url, media_file)
-                if not os.path.exists(file_path):
-                    raise FileNotFoundError(f"Media file not found: {file_path}")
-
-                media_result = self.image_moderator.moderate(file_path)
-                if media_result["label"] in ["nsfw", "violence", "political"]:
-                    media_label = media_result["label"]
-                    break
+            if media: 
+                for media_file in media:
+                    media_result = self.image_moderator.moderate(request.base_url, media_file)
+                    if media_result["label"] == "error":
+                        media_label = "error"
+                        break
+                    elif media_result["label"] in ["nsfw", "violence", "political"]:
+                        media_label = media_result["label"]
+                        break
+                    else:
+                        media_label = "normal"
 
             media_response = MediaResult(label=media_label)
 
@@ -95,36 +108,51 @@ class Consumer:
                 content=content_response,
                 media=media_response
             )
-            self.producer.publish(response)
 
-            ch.basic_ack(delivery_tag=method.delivery_tag)
+            print("send message create post for main server")
+            self.producer.publish(response)
+            return True
 
         except Exception as e:
-            print(f"Error processing message (attempt {retries + 1}/{self.max_retries}): {e}")
+            print(f"Error processing message: {e}")
+            return False
 
-            if retries < self.max_retries:
-                headers = properties.headers or {}
-                headers["x-retries"] = retries + 1
+    def callback(self, ch, method, properties, body):
+        success = self.process_message(body, properties)
+        if success:
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+        else:
+            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+
+    def dlq_callback(self, ch, method, properties, body):
+        count = 0
+        if properties.headers and "x-death" in properties.headers:
+            for death in properties.headers["x-death"]:
+                if death.get("queue") == self.queue and "count" in death:
+                    count = death["count"]
+                    break
+
+        print(f"Processing DLQ message (retry count: {count})")
+
+        if count < self.max_retries:
+            success = self.process_message(body, properties)
+            if success:
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+            else:
                 ch.basic_publish(
                     exchange=self.exchange,
                     routing_key=self.queue,
                     body=body,
                     properties=pika.BasicProperties(
-                        headers=headers,
+                        headers=properties.headers,
                         delivery_mode=2
                     )
                 )
-                print(f"Retrying message: {body}")
-            else:
-                ch.basic_publish(
-                    exchange=self.dlx,
-                    routing_key=self.dlq,
-                    body=body,
-                    properties=pika.BasicProperties(delivery_mode=2)
-                )
-                print(f"Message moved to DLQ after {self.max_retries} retries: {body}")
-
-            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+                print(f"Republishing message to {self.queue}: {body}")
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+        else:
+            print(f"Max retries ({self.max_retries}) reached, discarding message: {body}")
+            ch.basic_ack(delivery_tag=method.delivery_tag)
 
     def start_consuming(self):
         try:
@@ -132,6 +160,11 @@ class Consumer:
             self.channel.basic_consume(
                 queue=self.queue,
                 on_message_callback=self.callback,
+                auto_ack=False
+            )
+            self.channel.basic_consume(
+                queue=self.dlq,
+                on_message_callback=self.dlq_callback,
                 auto_ack=False
             )
             self.channel.start_consuming()

@@ -11,15 +11,8 @@ class Producer:
         self.exchange = CREATE_POST_EXCHANGE
         self.queue = CREATE_POST_QUEUE
 
-        self.channel.exchange_declare(exchange=self.exchange, exchange_type="direct")
-        self.channel.queue_declare(queue=self.queue, durable=True)
-        self.channel.queue_bind(
-            queue=self.queue,
-            exchange=self.exchange,
-            routing_key=self.queue
-        )
-
     def publish(self, message: PostModerationResponse):
+        print("send message create post for main server")
         try:
             if self.channel is None or self.channel.is_closed:
                 self.channel = self.connection.get_channel()

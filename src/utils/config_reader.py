@@ -3,10 +3,10 @@ import yaml
 
 class RabbitMQConfig:
     def __init__(self, config_dict):
-        self.host = config_dict.get("host", "localhost")
-        self.port = config_dict.get("port", 5672)
+        self.url = config_dict.get("url", "amqp://guest:guest@localhost:5672/")
         self.username = config_dict.get("username", "guest")
         self.password = config_dict.get("password", "guest")
+        self.vhost = config_dict.get("vhost", "/")
         self.connection_timeout = config_dict.get("connection_timeout", 10)
         self.max_reconnect_attempts = config_dict.get("max_reconnect_attempts", 5)
 
@@ -17,6 +17,7 @@ class ConfigReader:
         self.config = self.load_config()
 
     def load_config(self):
+        print(self.config_env)
         try:
             with open(self.config_path, 'r') as file:
                 return yaml.safe_load(file)
