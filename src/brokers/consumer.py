@@ -1,6 +1,5 @@
 import json
 import pika
-import os
 from utils.rabbitmq_connection import RabbitMQConnection
 from models.text_moderator import TextModerator
 from models.image_moderator import ImageModerator

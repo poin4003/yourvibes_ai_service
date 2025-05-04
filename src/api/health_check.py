@@ -1,8 +1,7 @@
 import http.server
 import socketserver
 import json
-
-PORT = 5000
+from utils.config_reader import ConfigReader
 
 class HealthCheckHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
@@ -22,7 +21,11 @@ class HealthCheckHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
-def run_health_check_server():
+def run_health_check_server(config_env=None):
+    config_reader = ConfigReader(config_env)
+    server_config = config_reader.get_server_config()
+    PORT = server_config.port 
+
     print(f"Starting health check server on port {PORT}...")
     try:
         server = socketserver.TCPServer(("0.0.0.0", PORT), HealthCheckHandler)

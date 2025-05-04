@@ -2,6 +2,7 @@ import threading
 import time
 from brokers.consumer import Consumer
 from api.health_check import run_health_check_server
+from api.comment_censor import serve
 from utils.rabbitmq_connection import RabbitMQConnection
 
 def start_consumer():
@@ -19,6 +20,10 @@ def main():
     consumer_thread = threading.Thread(target=start_consumer)
     consumer_thread.daemon = True
     consumer_thread.start()
+
+    grpc_thread = threading.Thread(target=serve)
+    grpc_thread.daemon = True 
+    grpc_thread.start()
 
     health_check_server = run_health_check_server() 
     health_check_thread = threading.Thread(target=health_check_server.serve_forever)

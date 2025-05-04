@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package comment_censor;
+
+option go_package = "/comment_pb";
+
+message CommentCensorRequest {
+  string comment_id = 1;
+  string content = 2;
+}
+
+message CommentCensorResponse {
+  string censor_content = 1;
+}
+
+service CommentCensorService {
+  rpc CheckComment (CommentCensorRequest) returns (CommentCensorResponse);
+}

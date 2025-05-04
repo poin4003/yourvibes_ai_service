@@ -16,3 +16,17 @@ dev:
 prod:
 	@echo "Running in production mode"
 	@$(SET_ENV) YOURVIBES_AI_CONFIG_FILE=prod&&python ./src/$(APP_NAME)
+
+
+# gRPC code generation
+PROTO_DIR = proto
+OUT_DIR = src/grpc_pkg/comment_pb
+
+gen-grpc:
+	@echo Generating gRPC code for $(FILE).proto...
+	python -m grpc_tools.protoc -I=$(PROTO_DIR) \
+		--python_out=$(OUT_DIR) \
+		--grpc_python_out=$(OUT_DIR) \
+	$(PROTO_DIR)/$(FILE).proto
+
+.PHONY: dev prod gen-grpc

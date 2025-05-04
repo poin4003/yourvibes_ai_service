@@ -1,6 +1,10 @@
 import os
 import yaml
 
+class Server:
+    def __init__(self, config_dict):
+        self.port = config_dict.get("port", 5000)
+
 class RabbitMQConfig:
     def __init__(self, config_dict):
         self.url = config_dict.get("url", "amqp://guest:guest@localhost:5672/")
@@ -9,6 +13,11 @@ class RabbitMQConfig:
         self.vhost = config_dict.get("vhost", "/")
         self.connection_timeout = config_dict.get("connection_timeout", 10)
         self.max_reconnect_attempts = config_dict.get("max_reconnect_attempts", 5)
+
+class GrpcServer:
+    def __init__(self, config_dict):
+        self.host = config_dict.get("host", "localhost")
+        self.port = config_dict.get("port", 50051)
 
 class ConfigReader:
     def __init__(self, config_env=None):
@@ -26,6 +35,14 @@ class ConfigReader:
         except Exception as e:
             raise Exception(f"Error loading config file {self.config_path}: {str(e)}")
 
+    def get_server_config(self):
+        server_config = self.config.get("server", {})
+        return Server(server_config)
+
     def get_rabbitmq_config(self):
         rabbitmq_config = self.config.get("rabbitmq", {})
         return RabbitMQConfig(rabbitmq_config)
+    
+    def get_grpc_server_config(self):
+        grpc_server_config = self.config.get("grpc_server", {})
+        return GrpcServer(grpc_server_config)
