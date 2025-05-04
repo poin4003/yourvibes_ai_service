@@ -20,9 +20,9 @@ class CommentCensorServicer(comment_censor_pb2_grpc.CommentCensorServiceServicer
 
 def serve(config_env=None):
     config_reader = ConfigReader(config_env)
-    grpc_config = config_reader.get_grpc_server_config()
-    host = grpc_config.host
-    port = grpc_config.port
+    comment_censor_grpc_conn = config_reader.get_comment_censor_grpc_conn_config()
+    host = comment_censor_grpc_conn.host
+    port = comment_censor_grpc_conn.port
 
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     comment_censor_pb2_grpc.add_CommentCensorServiceServicer_to_server(CommentCensorServicer(), server)

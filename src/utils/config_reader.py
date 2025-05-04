@@ -14,7 +14,7 @@ class RabbitMQConfig:
         self.connection_timeout = config_dict.get("connection_timeout", 10)
         self.max_reconnect_attempts = config_dict.get("max_reconnect_attempts", 5)
 
-class GrpcServer:
+class CommentCensorGrpcConn:
     def __init__(self, config_dict):
         self.host = config_dict.get("host", "localhost")
         self.port = config_dict.get("port", 50051)
@@ -43,6 +43,6 @@ class ConfigReader:
         rabbitmq_config = self.config.get("rabbitmq", {})
         return RabbitMQConfig(rabbitmq_config)
     
-    def get_grpc_server_config(self):
-        grpc_server_config = self.config.get("grpc_server", {})
-        return GrpcServer(grpc_server_config)
+    def get_comment_censor_grpc_conn_config(self):
+        comment_censor_grpc_conn = self.config.get("comment_censor_grpc_conn", {})
+        return CommentCensorGrpcConn(comment_censor_grpc_conn)
