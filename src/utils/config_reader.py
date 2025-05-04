@@ -1,8 +1,10 @@
 import os
 import yaml
+import threading
 
 class ConfigReader:
     _instance = None
+    _lock = threading.Lock()
 
     def __new__(cls, config_env=None):
         if cls._instance is None:
