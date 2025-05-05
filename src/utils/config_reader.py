@@ -5,16 +5,18 @@ import threading
 class ConfigReader:
     _instance = None
     _lock = threading.Lock()
+    _initialized = threading.Event() 
 
     def __new__(cls, config_env=None):
-        if cls._instance is None:
-            cls._instance = super(ConfigReader, cls).__new__(cls)
-            cls._instance._init(config_env)
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super(ConfigReader, cls).__new__(cls)
+                cls._instance._init(config_env)
+                cls._initialized.set()  
+        cls._initialized.wait() 
         return cls._instance
 
     def _init(self, config_env):
-        if hasattr(self, 'config'):
-            return  
         self.config_env = config_env or os.getenv("YOURVIBES_AI_CONFIG_FILE", "dev")
         self.config_path = os.path.join("config", f"{self.config_env}.yaml")
         self.config = self.load_config()
