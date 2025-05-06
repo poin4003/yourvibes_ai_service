@@ -2,84 +2,85 @@ import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from langdetect import detect
 from googletrans import Translator
+import re
+
 
 class TextModerator:
-    def __init__(self, vietnamese_model="vinai/phobert-base", english_model="martin-ha/toxic-comment-model", threshold=0.5):
+    def __init__(self, english_model="martin-ha/toxic-comment-model", threshold=0.5):
         self.toxic_threshold = threshold
-
-        self.vi_tokenizer = AutoTokenizer.from_pretrained(vietnamese_model)
-        self.vi_model = AutoModelForSequenceClassification.from_pretrained(vietnamese_model).to(self._device())
-
-        self.en_tokenizer = AutoTokenizer.from_pretrained(english_model)
-        self.en_model = AutoModelForSequenceClassification.from_pretrained(english_model).to(self._device())
-
-        self.cache = {}
+        self.tokenizer = AutoTokenizer.from_pretrained(english_model)
+        self.model = AutoModelForSequenceClassification.from_pretrained(english_model).to(self._device())
         self.translator = Translator()
+        self.translation_cache = {}
+        self.prediction_cache = {}
+
+        predefined_toxic_words = [
+            "vl", "vcl", "dm", "đm", "cc", "cl", "dmm",
+            "đĩ", "địt", "lồn", "buồi"
+        ]
+        for word in predefined_toxic_words:
+            self.translation_cache[word] = word
+            self.prediction_cache[word] = 1.0
 
     def _device(self):
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def moderate(self, text):
-        toxic_score, label = self._classify_text(text)
-        censored = self._censor_words(text)
+        lang = detect(text)
+        words = text.split()
+        translated_words = []
+
+        if lang == "vi":
+            for word in words:
+                cleaned = self._normalize_word(word)
+                if cleaned in self.translation_cache:
+                    translated_words.append(self.translation_cache[cleaned])
+                else:
+                    try:
+                        translated = self.translator.translate(cleaned, src="vi", dest="en").text
+                    except Exception:
+                        translated = cleaned
+                    self.translation_cache[cleaned] = translated
+                    translated_words.append(translated)
+        else:
+            translated_words = [self._normalize_word(word) for word in words]
+
+        uncached_indices = []
+        uncached_translations = []
+        toxic_scores = []
+
+        for i, word in enumerate(translated_words):
+            if word in self.prediction_cache:
+                toxic_scores.append(self.prediction_cache[word])
+            else:
+                uncached_indices.append(i)
+                uncached_translations.append(word)
+                toxic_scores.append(None)
+
+        if uncached_translations:
+            encoded = self.tokenizer(uncached_translations, return_tensors="pt", padding=True, truncation=True).to(self._device())
+            with torch.no_grad():
+                outputs = self.model(**encoded)
+                scores = torch.nn.functional.softmax(outputs.logits, dim=-1)
+                new_scores = scores[:, 1].tolist()
+
+            for i, score in zip(uncached_indices, new_scores):
+                toxic_scores[i] = score
+                self.prediction_cache[translated_words[i]] = score
+
+        censored_words = []
+        for orig_word, score in zip(words, toxic_scores):
+            if score > self.toxic_threshold:
+                censored_word = ''.join('*' if c.isalnum() else c for c in orig_word)
+                censored_words.append(censored_word)
+            else:
+                censored_words.append(orig_word)
+
+        censored_text = ' '.join(censored_words)
         return {
-            "censored_text": censored,
-            "label": label,
-            "score": round(toxic_score, 4),
+            "censored_text": censored_text,
         }
 
-    def _classify_text(self, text):
-        lang = detect(text)
-        if lang == "vi":
-            tokenizer, model = self.vi_tokenizer, self.vi_model
-        else:
-            tokenizer, model = self.en_tokenizer, self.en_model
+    def _normalize_word(self, word):
+        return re.sub(r'\W+', '', word.lower())
 
-        encoded = tokenizer(text, return_tensors="pt", truncation=True, padding=True).to(self._device())
-        with torch.no_grad():
-            output = model(**encoded)
-            scores = torch.nn.functional.softmax(output.logits, dim=-1)
-            toxic_score = scores[0][1].item()
-
-        return toxic_score, "toxic" if toxic_score > self.toxic_threshold else "not toxic"
-
-    def _censor_words(self, text):
-        words = text.split()
-        censored_words = []
-
-        for word in words:
-            stripped = word.strip(",.!?;:\"'()[]{}").lower()
-
-            if len(stripped) <= 1:
-                censored_words.append(word)
-                continue
-
-            if stripped in self.cache:
-                score = self.cache[stripped]
-            else:
-                lang = detect(stripped)
-                tokenizer = self.vi_tokenizer if lang == "vi" else self.en_tokenizer
-                model = self.vi_model if lang == "vi" else self.en_model
-
-                try:
-                    encoded = tokenizer(stripped, return_tensors="pt", truncation=True, padding=True).to(self._device())
-                    with torch.no_grad():
-                        output = model(**encoded)
-                        scores = torch.nn.functional.softmax(output.logits, dim=-1)
-                        score = scores[0][1].item()
-                except Exception:
-                    score = 0.0 
-
-                self.cache[stripped] = score
-
-            if score > self.toxic_threshold:
-                censored = "*" * len(stripped)
-                prefix_len = word.find(stripped)
-                suffix_len = len(word) - prefix_len - len(stripped)
-                prefix = word[:prefix_len]
-                suffix = word[-suffix_len:] if suffix_len > 0 else ""
-                censored_words.append(prefix + censored + suffix)
-            else:
-                censored_words.append(word)
-
-        return " ".join(censored_words)
