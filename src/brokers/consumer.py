@@ -94,7 +94,7 @@ class Consumer:
                     if media_result["label"] == "error":
                         media_label = "error"
                         break
-                    elif media_result["label"] in ["nsfw", "violence", "political"]:
+                    elif media_result["label"] in ["nsfw", "violence", "political", "abuse"]:
                         media_label = media_result["label"]
                         break
                     else:

@@ -18,24 +18,26 @@ class ImageModerator:
         self.clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
         self.violence_labels = ["normal", "violence"]
         self.political_labels = ["normal", "political"]
-        self.abuse_labels = ["normal", "nude child", "child abuse", "child in swimsuit", "child without clothes"]
+        self.abuse_labels = ["normal", "nude child", "child abuse", "child in swimsuit", "child in bikini", "child without clothes", "child shirtless", "child naked"]
 
         self.violence_threshold = 0.7
         self.political_threshold = 0.7
-        self.abuse_threshold = 0.5  
+        self.abuse_threshold = 0.4
 
     def _fetch_media(self, base_url: str, media_filename: str) -> str:
         try:
             media_url = f"{base_url}{media_filename}"
             print(f"Fetching media from: {media_url}", flush=True)
 
-            headers = {"Range": "bytes=0-"}
-            response = requests.get(media_url, headers=headers, stream=True, timeout=10)
+            response = requests.get(media_url, stream=True, timeout=10)
             response.raise_for_status()
 
+            first_chunk = next(response.iter_content(chunk_size=8192), None)
+            if not first_chunk:
+                raise ValueError("No data received")
+
             content_length = int(response.headers.get("Content-Length", 0))
-            if content_length == 0:
-                raise ValueError("Received empty data from API")
+            print(f"Content-Length: {content_length}", flush=True)
 
             temp_dir = os.path.join("src", "temp")
             os.makedirs(temp_dir, exist_ok=True)
@@ -43,24 +45,33 @@ class ImageModerator:
             suffix = os.path.splitext(media_filename)[1]
             temp_filename = f"temp_{uuid.uuid4().hex}{suffix}"
             tmp_path = os.path.join(temp_dir, temp_filename)
+            print(f"Saving to: {tmp_path}", flush=True)
 
+            total_size = 0
             with open(tmp_path, "wb") as tmp_file:
+                tmp_file.write(first_chunk)
+                total_size += len(first_chunk)
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
                         tmp_file.write(chunk)
+                        total_size += len(chunk)
+                print(f"Total bytes written: {total_size}", flush=True)
+
+            if os.path.getsize(tmp_path) == 0:
+                raise ValueError("Downloaded file is empty")
 
             return tmp_path
 
         except Exception as e:
             print(f"Error fetching or saving media: {e}", flush=True)
-            raise
+            raise 
 
     def moderate_image(self, image_path: str) -> dict:
         try:
             image = Image.open(image_path).convert("RGB")
         except Exception as e:
             print(f"Error opening image {image_path}: {e}", flush=True)
-            raise
+            return {"label": "error", "score": 0.0, "error": str(e)}
 
         inputs_nsfw = self.nsfw_processor(images=image, return_tensors="pt").to(self.device)
         outputs_nsfw = self.nsfw_model(**inputs_nsfw)
@@ -70,7 +81,9 @@ class ImageModerator:
         print(f"NSFW detection: {nsfw_label} ({nsfw_score:.4f})", flush=True)
 
         if nsfw_label == "nsfw":
-            return {"label": "nsfw", "score": round(nsfw_score, 4)}
+            result = {"label": "nsfw", "score": round(nsfw_score, 4)}
+            print(f"Returning: {result}", flush=True)
+            return result
 
         inputs_clip_violence = self.clip_processor(text=self.violence_labels, images=image, return_tensors="pt", padding=True).to(self.device)
         outputs_clip_violence = self.clip_model(**inputs_clip_violence)
@@ -80,7 +93,9 @@ class ImageModerator:
         print(f"Violence detection: {violence_label} ({violence_score:.4f})", flush=True)
 
         if violence_label == "violence" and violence_score > self.violence_threshold:
-            return {"label": "violence", "score": round(violence_score, 4)}
+            result = {"label": "violence", "score": round(violence_score, 4)}
+            print(f"Returning: {result}", flush=True)
+            return result
 
         inputs_clip_political = self.clip_processor(text=self.political_labels, images=image, return_tensors="pt", padding=True).to(self.device)
         outputs_clip_political = self.clip_model(**inputs_clip_political)
@@ -90,19 +105,27 @@ class ImageModerator:
         print(f"Political detection: {political_label} ({political_score:.4f})", flush=True)
 
         if political_label == "political" and political_score > self.political_threshold:
-            return {"label": "political", "score": round(political_score, 4)}
+            result = {"label": "political", "score": round(political_score, 4)}
+            print(f"Returning: {result}", flush=True)
+            return result
 
         inputs_clip_abuse = self.clip_processor(text=self.abuse_labels, images=image, return_tensors="pt", padding=True).to(self.device)
         outputs_clip_abuse = self.clip_model(**inputs_clip_abuse)
         probs_abuse = outputs_clip_abuse.logits_per_image.softmax(dim=1).tolist()[0]
+        for label, score in zip(self.abuse_labels, probs_abuse):
+            print(f"Abuse label '{label}': {score:.4f}", flush=True)
         abuse_label = self.abuse_labels[probs_abuse.index(max(probs_abuse))]
         abuse_score = max(probs_abuse)
-        print(f"Abuse detection: {abuse_label} ({abuse_score:.4f})", flush=True)
+        print(f"Final abuse detection: {abuse_label} ({abuse_score:.4f})", flush=True)
 
-        if abuse_label != "normal" and abuse_score > self.abuse_threshold:
-            return {"label": "abuse", "score": round(abuse_score, 4)}
+        if abuse_label != "abuse" and abuse_score > self.abuse_threshold:
+            result = {"label": "abuse", "score": round(abuse_score, 4)}
+            print(f"Returning abuse result: {result}", flush=True)
+            return result
 
-        return {"label": "normal", "score": round(nsfw_score, 4)}
+        result = {"label": "normal", "score": round(nsfw_score, 4)}
+        print(f"Returning normal result: {result}", flush=True)
+        return result
 
     def moderate(self, base_url: str, media_filename: str) -> dict:
         try:
@@ -155,6 +178,7 @@ class ImageModerator:
         for priority_label in ["nsfw", "abuse", "violence", "political"]:
             if priority_label in labels:
                 final_score = mean([s for l, s in zip(labels, scores) if l == priority_label])
-                return {"label": priority_label, "score": round(final_score, 4)}
+                detail = next((r.get("detail", "") for r in results if r["label"] == priority_label), "")
+                return {"label": priority_label, "score": round(final_score, 4), "detail": detail}
 
         return {"label": "normal", "score": round(mean(scores), 4)}

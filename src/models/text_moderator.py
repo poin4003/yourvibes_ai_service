@@ -4,7 +4,6 @@ from langdetect import detect
 from googletrans import Translator
 import re
 
-
 class TextModerator:
     def __init__(self, english_model="martin-ha/toxic-comment-model", threshold=0.5):
         self.toxic_threshold = threshold
@@ -26,7 +25,19 @@ class TextModerator:
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def moderate(self, text):
-        lang = detect(text)
+
+        if not text or not text.strip():
+            result = {"label": "normal", "censored_text": ""}
+            print(f"Returning: {result}", flush=True)
+            return result
+
+        try:
+            lang = detect(text)
+            print(f"Detected language: {lang}", flush=True)
+        except Exception as e:
+            print(f"Language detection error: {e}", flush=True)
+            lang = "en"  
+
         words = text.split()
         translated_words = []
 
@@ -38,9 +49,10 @@ class TextModerator:
                 else:
                     try:
                         translated = self.translator.translate(cleaned, src="vi", dest="en").text
-                    except Exception:
+                        self.translation_cache[cleaned] = translated
+                    except Exception as e:
+                        print(f"Translation error for word '{cleaned}': {e}", flush=True)
                         translated = cleaned
-                    self.translation_cache[cleaned] = translated
                     translated_words.append(translated)
         else:
             translated_words = [self._normalize_word(word) for word in words]
@@ -77,10 +89,13 @@ class TextModerator:
                 censored_words.append(orig_word)
 
         censored_text = ' '.join(censored_words)
-        return {
-            "censored_text": censored_text,
+        label = "toxic" if any(score > self.toxic_threshold for score in toxic_scores) else "normal"
+        result = {
+            "label": label,
+            "censored_text": censored_text
         }
+        print(f"Returning: {result}", flush=True)
+        return result
 
     def _normalize_word(self, word):
         return re.sub(r'\W+', '', word.lower())
-
