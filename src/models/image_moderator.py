@@ -29,7 +29,7 @@ class ImageModerator:
             media_url = f"{base_url}{media_filename}"
             print(f"Fetching media from: {media_url}", flush=True)
 
-            response = requests.get(media_url, stream=True, timeout=10)
+            response = requests.get(media_url, stream=True, timeout=10, verify=False)
             response.raise_for_status()
 
             first_chunk = next(response.iter_content(chunk_size=8192), None)
