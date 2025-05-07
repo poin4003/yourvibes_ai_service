@@ -118,8 +118,8 @@ class ImageModerator:
         abuse_score = max(probs_abuse)
         print(f"Final abuse detection: {abuse_label} ({abuse_score:.4f})", flush=True)
 
-        if abuse_label != "abuse" and abuse_score > self.abuse_threshold:
-            result = {"label": "abuse", "score": round(abuse_score, 4)}
+        if abuse_label != "normal" and abuse_score > self.abuse_threshold:
+            result = {"label": "abuse", "score": round(abuse_score, 4), "detail": abuse_label}
             print(f"Returning abuse result: {result}", flush=True)
             return result
 
